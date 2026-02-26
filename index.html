@@ -35,7 +35,10 @@
 
             <div id="info-panel" class="info-panel hidden">
                 <div class="panel-header">
-                    <h2 id="bus-line">--</h2>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <h2 id="bus-line">--</h2>
+                        <button id="btn-favorite-toggle" class="btn-icon" title="Favoritar Linha">☆</button>
+                    </div>
                     <span id="bus-status" class="status-badge">Buscando...</span>
                 </div>
                 <div class="panel-body">
@@ -59,6 +62,7 @@
 
         <main id="map-container">
             <div id="map"></div>
+            <button id="btn-location" class="btn-floating" title="Minha Localização">📍</button>
         </main>
     </div>
 

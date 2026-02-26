@@ -82,3 +82,39 @@ input[type="text"] {
     .app-container { flex-direction: row; }
     .sidebar { width: 350px; height: 100vh; max-height: 100vh; border-bottom: none; border-right: 1px solid var(--border); }
 }
+
+/* --- NOVAS REGRAS: GPS e Favoritos --- */
+.btn-floating {
+    position: absolute;
+    bottom: 25px;
+    right: 15px;
+    z-index: 1000; /* Garante que fique acima do Leaflet */
+    background: var(--panel-bg);
+    border: 2px solid var(--border);
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    font-size: 1.5rem;
+    cursor: pointer;
+    box-shadow: var(--shadow);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.btn-floating:hover {
+    background: var(--border);
+    transform: scale(1.05);
+}
+
+.star-active {
+    color: #f1c40f; /* Cor dourada */
+    text-shadow: 0 0 5px rgba(241, 196, 15, 0.4);
+}
+
+.btn-filter.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}

@@ -62,47 +62,40 @@ class AppController {
     constructor() {
         this.dataService = new TransitDataService();
         this.map = null;
-        this.busMarker = {}; // Agora é um objeto para suportar múltiplos ônibus
+        this.busMarkers = {}; // Suporte a múltiplos ônibus
         this.routeLayer = null;
         this.stopMarkers = [];
+        this.userMarker = null; // Rastreio do usuário (GPS)
         this.pollingInterval = null;
         this.currentLine = null;
+        
+        // Carrega favoritos do banco de dados do navegador (localStorage)
+        this.favorites = JSON.parse(localStorage.getItem('rioBusFavorites')) || [];
+        this.showingFavorites = false;
 
-        // Chama a nova rotina de inicialização assíncrona
-        this.bootstrapApp(); 
+        this.bootstrapApp();
     }
 
-    // NOVA ROTINA: Prepara os dados antes de liberar a tela
     async bootstrapApp() {
         const searchInput = document.getElementById('bus-search');
-        
-        // Desabilita o input e avisa o usuário
         searchInput.disabled = true;
         searchInput.placeholder = "Carregando malha viária do Rio...";
 
-        // Espera o fetch() terminar
         await this.dataService.loadRoutes();
 
-        // Libera o input para uso
         searchInput.disabled = false;
         searchInput.placeholder = "Buscar linha (ex: 474, 107)...";
 
-        // Inicializa o resto da interface
         this.initMap();
         this.bindEvents();
         this.initTheme();
     }
 
     initMap() {
-        // Inicializa mapa focado no Centro do Rio de Janeiro
         this.map = L.map('map', { zoomControl: false }).setView([-22.9068, -43.1729], 12);
-        
-        // Tiles do OpenStreetMap
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '© OpenStreetMap contributors'
+            maxZoom: 19, attribution: '© OpenStreetMap'
         }).addTo(this.map);
-        
         L.control.zoom({ position: 'bottomright' }).addTo(this.map);
     }
 
@@ -110,35 +103,83 @@ class AppController {
         const searchInput = document.getElementById('bus-search');
         const resultsList = document.getElementById('autocomplete-results');
         const themeToggle = document.getElementById('theme-toggle');
+        const btnLocation = document.getElementById('btn-location');
+        const btnFavoriteToggle = document.getElementById('btn-favorite-toggle');
+        const filterBtns = document.querySelectorAll('.btn-filter');
 
+        // Lógica de Autocompletar
         searchInput.addEventListener('input', (e) => {
-            const query = e.target.value;
+            const query = e.target.value.toUpperCase();
             resultsList.innerHTML = '';
-            if (query.length < 2) {
+            
+            if (query.length < 2 && !this.showingFavorites) {
                 resultsList.classList.add('hidden');
                 return;
             }
 
-            const results = this.dataService.searchLines(query);
-            if (results.length > 0) {
-                resultsList.classList.remove('hidden');
-                results.forEach(line => {
-                    const li = document.createElement('li');
-                    li.textContent = `${line} - ${this.dataService.getRouteData(line).dest}`;
-                    li.onclick = () => {
-                        searchInput.value = line;
-                        resultsList.classList.add('hidden');
-                        this.selectLine(line);
-                    };
-                    resultsList.appendChild(li);
-                });
-            }
+            // Filtra as linhas buscando por texto. Se a aba de favoritos estiver ativa, busca só nos favoritos.
+            let results = Object.keys(this.dataService.routesDB).filter(line => {
+                const route = this.dataService.routesDB[line];
+                const matchesText = line.includes(query) || route.dest.toUpperCase().includes(query);
+                const isFavorite = this.favorites.includes(line);
+                
+                return this.showingFavorites ? (matchesText && isFavorite) : matchesText;
+            });
+
+            this.renderAutocomplete(results);
         });
 
+        // Alternar entre abas "Todas" e "Favoritas"
+        filterBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                filterBtns.forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                
+                this.showingFavorites = e.target.textContent.includes('Favoritas');
+                
+                if (this.showingFavorites) {
+                    // Se clicou em favoritas, mostra a lista salva imediatamente
+                    this.renderAutocomplete(this.favorites);
+                } else {
+                    resultsList.classList.add('hidden');
+                    searchInput.value = '';
+                }
+            });
+        });
+
+        // Eventos de Botões Isolados
         themeToggle.addEventListener('click', () => {
             const current = document.documentElement.getAttribute('data-theme');
             document.documentElement.setAttribute('data-theme', current === 'dark' ? 'light' : 'dark');
         });
+
+        btnLocation.addEventListener('click', () => this.getUserLocation());
+        btnFavoriteToggle.addEventListener('click', () => this.toggleFavorite());
+    }
+
+    renderAutocomplete(resultsArray) {
+        const resultsList = document.getElementById('autocomplete-results');
+        resultsList.innerHTML = '';
+        
+        if (resultsArray.length > 0) {
+            resultsList.classList.remove('hidden');
+            resultsArray.forEach(line => {
+                const li = document.createElement('li');
+                const dest = this.dataService.routesDB[line] ? this.dataService.routesDB[line].dest : 'Desconhecido';
+                // Adiciona uma estrelinha na busca se for favorito
+                const starIcon = this.favorites.includes(line) ? '⭐ ' : ''; 
+                li.textContent = `${starIcon}${line} - ${dest}`;
+                
+                li.onclick = () => {
+                    document.getElementById('bus-search').value = line;
+                    resultsList.classList.add('hidden');
+                    this.selectLine(line);
+                };
+                resultsList.appendChild(li);
+            });
+        } else {
+            resultsList.classList.add('hidden');
+        }
     }
 
     initTheme() {
@@ -149,14 +190,25 @@ class AppController {
 
     async selectLine(lineCode) {
         this.currentLine = lineCode;
-        const route = this.dataService.getRouteData(lineCode);
+        const route = this.dataService.routesDB[lineCode];
+        if(!route) return;
         
-        // UI Updates
+        // Atualiza a interface
         document.getElementById('empty-state').classList.add('hidden');
         document.getElementById('loading-indicator').classList.remove('hidden');
         document.getElementById('info-panel').classList.add('hidden');
 
         this.clearMap();
+
+        // Checa se é favorita para acender ou apagar a estrela
+        const starBtn = document.getElementById('btn-favorite-toggle');
+        if (this.favorites.includes(lineCode)) {
+            starBtn.classList.add('star-active');
+            starBtn.textContent = '★'; // Estrela preenchida
+        } else {
+            starBtn.classList.remove('star-active');
+            starBtn.textContent = '☆'; // Estrela vazia
+        }
 
         // Desenhar Trajeto
         this.routeLayer = L.polyline(route.path, { color: 'var(--primary)', weight: 5, opacity: 0.7 }).addTo(this.map);
@@ -165,32 +217,83 @@ class AppController {
         // Desenhar Paradas
         route.stops.forEach(stop => {
             const marker = L.circleMarker([stop.lat, stop.lng], {
-                radius: 6, fillColor: '#ffffff', color: 'var(--primary)', weight: 2, fillOpacity: 1
-            }).addTo(this.map).bindPopup(stop.name);
+                radius: 5, fillColor: '#ffffff', color: 'var(--primary)', weight: 2, fillOpacity: 1
+            }).addTo(this.map).bindPopup(`<b>${stop.name}</b>`);
             this.stopMarkers.push(marker);
         });
 
-        // Preencher Painel UI
+        // Preencher Painel
         document.getElementById('bus-line').textContent = route.name;
-        document.getElementById('bus-destination').textContent = route.dest;
         
         const stopsList = document.getElementById('stops-list');
         stopsList.innerHTML = '';
         route.stops.forEach(stop => {
             const li = document.createElement('li');
-            li.innerHTML = `<strong>${stop.name}</strong> <br> <small class="text-muted">ETA: ${stop.etaMinutes} min</small>`;
+            li.innerHTML = `<strong>${stop.name}</strong>`;
             stopsList.appendChild(li);
         });
 
         this.startRealTimeTracking();
     }
 
+    toggleFavorite() {
+        if (!this.currentLine) return;
+        
+        const index = this.favorites.indexOf(this.currentLine);
+        const starBtn = document.getElementById('btn-favorite-toggle');
+
+        if (index === -1) {
+            // Não é favorito, então vamos adicionar
+            this.favorites.push(this.currentLine);
+            starBtn.classList.add('star-active');
+            starBtn.textContent = '★';
+        } else {
+            // Já é favorito, então vamos remover
+            this.favorites.splice(index, 1);
+            starBtn.classList.remove('star-active');
+            starBtn.textContent = '☆';
+        }
+
+        // Salva no banco de dados do navegador
+        localStorage.setItem('rioBusFavorites', JSON.stringify(this.favorites));
+    }
+
+    async getUserLocation() {
+        if (!navigator.geolocation) {
+            alert("Seu navegador não suporta geolocalização.");
+            return;
+        }
+
+        const btn = document.getElementById('btn-location');
+        btn.textContent = "⏳"; // Indicador de carregamento
+
+        navigator.geolocation.getCurrentPosition((position) => {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+
+            // Desenha um ponto vermelho marcando a localização do usuário
+            if (this.userMarker) {
+                this.userMarker.setLatLng([lat, lng]);
+            } else {
+                this.userMarker = L.circleMarker([lat, lng], {
+                    radius: 8, fillColor: "#e74c3c", color: "#c0392b", weight: 3, fillOpacity: 1
+                }).addTo(this.map).bindPopup("<b>Você está aqui!</b>");
+            }
+
+            // Animação da câmera voando até o usuário
+            this.map.flyTo([lat, lng], 15, { animate: true, duration: 1.5 });
+            btn.textContent = "📍";
+        }, (error) => {
+            console.warn("Erro de GPS:", error);
+            alert("Não foi possível acessar seu GPS. Verifique se o navegador tem permissão.");
+            btn.textContent = "📍";
+        }, { enableHighAccuracy: true });
+    }
+
     async startRealTimeTracking() {
         if (this.pollingInterval) clearInterval(this.pollingInterval);
-
-        // Atualização a cada 3 segundos para suavidade na demonstração
         this.pollingInterval = setInterval(() => this.updateBusPosition(), 3000);
-        await this.updateBusPosition(); // Primeira chamada imediata
+        await this.updateBusPosition();
 
         document.getElementById('loading-indicator').classList.add('hidden');
         document.getElementById('info-panel').classList.remove('hidden');
@@ -199,7 +302,6 @@ class AppController {
     async updateBusPosition() {
         if (!this.currentLine) return;
         
-        // Busca a frota no backend Python
         const frota = await this.dataService.getRealTimeBusLocation(this.currentLine);
         
         const statusBadge = document.getElementById('bus-status');
@@ -209,7 +311,6 @@ class AppController {
             return;
         }
 
-        // Atualiza a UI
         statusBadge.textContent = `${frota.length} em operação`;
         statusBadge.style.backgroundColor = "var(--success)";
         document.getElementById('bus-speed').textContent = `${frota[0].speed} (carro líder)`;
@@ -217,9 +318,7 @@ class AppController {
 
         const idsAtivos = new Set(frota.map(b => b.ordem));
 
-        // Rastreia e move os ônibus
         frota.forEach(bus => {
-            // Desenho do marcador com a velocidade impressa dentro dele!
             const busIcon = L.divIcon({
                 html: `<div style="background-color: var(--primary); color: white; border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.4); font-size: 11px; font-weight: bold;">${bus.speed}</div>`,
                 className: '', iconSize: [30, 30], iconAnchor: [15, 15]
@@ -228,13 +327,11 @@ class AppController {
             const popupContent = `<b>Carro:</b> ${bus.ordem}<br><b>Velocidade:</b> ${bus.speed} km/h<br><b>Visto em:</b> ${bus.timestamp}`;
 
             if (!this.busMarkers[bus.ordem]) {
-                // Ônibus novo no radar: cria o marcador
                 const marker = L.marker([bus.lat, bus.lng], { icon: busIcon })
                                 .bindPopup(popupContent)
                                 .addTo(this.map);
                 this.busMarkers[bus.ordem] = marker;
             } else {
-                // Ônibus já existe: desliza ele suavemente pelo mapa
                 const marker = this.busMarkers[bus.ordem];
                 marker.setLatLng([bus.lat, bus.lng]);
                 marker.setIcon(busIcon);
@@ -242,7 +339,6 @@ class AppController {
             }
         });
 
-        // Limpeza: remove do mapa os ônibus que desligaram o motor/GPS
         Object.keys(this.busMarkers).forEach(ordemId => {
             if (!idsAtivos.has(ordemId)) {
                 this.map.removeLayer(this.busMarkers[ordemId]);
@@ -252,19 +348,13 @@ class AppController {
     }
 
     clearMap() {
-        // 1. Removemos TODOS os ônibus atuais do mapa (Nova lógica)
         if (this.busMarkers) {
             Object.values(this.busMarkers).forEach(m => this.map.removeLayer(m));
         }
-        
-        // Mantemos a limpeza da linha azul da rota e dos pontos de parada
         if (this.routeLayer) this.map.removeLayer(this.routeLayer);
         this.stopMarkers.forEach(m => this.map.removeLayer(m));
         
-        // 2. Zeramos o dicionário de ônibus para a próxima busca (Nova lógica)
         this.busMarkers = {};
-        
-        // Mantemos a limpeza das variáveis antigas
         this.routeLayer = null;
         this.stopMarkers = [];
     }
