@@ -43,7 +43,7 @@ class TransitDataService {
         this.useRealAPI = true; // ATIVANDO A PRODUÇÃO!
         
         try {
-            const response = await fetch(`http://127.0.0.1:8000/api/onibus/${lineCode}`);
+            const response = await fetch(`https://rio-bus-api.onrender.com/api/onibus/${lineCode}`);
             if (!response.ok) return []; // Retorna vazio se der erro ou não tiver ônibus
             
             const data = await response.json();
