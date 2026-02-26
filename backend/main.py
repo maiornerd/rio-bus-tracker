@@ -5,10 +5,11 @@ from datetime import datetime
 
 app = FastAPI(title="Rio Bus Tracker - Proxy API")
 
+# Configuração corrigida do CORS para Nuvem
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False,
+    allow_credentials=False, 
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -48,7 +49,6 @@ async def obter_posicoes_linha(linha: str):
                         except Exception:
                             hora_formatada = str(v.get("datahora", ""))
 
-                        # AQUI ESTÁ A CORREÇÃO: Tratamento de vírgula para ponto!
                         lat_str = str(v.get("latitude", 0)).replace(',', '.')
                         lng_str = str(v.get("longitude", 0)).replace(',', '.')
                         speed_str = str(v.get("velocidade", 0)).replace(',', '.')
