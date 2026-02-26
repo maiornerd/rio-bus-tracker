@@ -1,0 +1,8 @@
+# Ignorar arquivos pesados do banco de dados do GTFS
+gtfs_processor/*.txt
+gtfs_processor/*.zip
+
+# Ignorar arquivos de cache do Python
+__pycache__/
+*.pyc
+backend/__pycache__/
