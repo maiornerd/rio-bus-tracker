@@ -64,7 +64,7 @@ Se você deseja clonar e rodar este projeto na sua máquina local:
     uvicorn main:app --reload
 
 3. **Inicie o Frontend:**
-    Abra a pasta raiz do projeto e execute o index.html usando uma extensão como o Live Server do VS Code. Certifique-se de alterar o endpoint da API no arquivo js/app.js para apontar para o seu localhost.
+    Abra a pasta raiz do projeto e execute o `index.html` usando uma extensão como o Live Server do VS Code. Certifique-se de alterar o endpoint da API no arquivo `js/app.js` para apontar para o seu localhost.
 
 ## 👨‍💻 Autor
 **Alan da Silva do Carmo**
