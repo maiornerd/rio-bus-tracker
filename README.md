@@ -68,6 +68,7 @@ Se você deseja clonar e rodar este projeto na sua máquina local:
 
 ## 👨‍💻 Autor
 **Alan da Silva do Carmo**
+
 Desenvolvedor Full-Stack
 
 *Projeto desenvolvido como portfólio prático de engenharia de software e integração de dados georreferenciados.*
