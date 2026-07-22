@@ -27,7 +27,7 @@ async def obter_posicoes_linha(linha: str):
             response = await client.get(DATA_RIO_URL)
             response.raise_for_status()
             
-            # A GRANDE SACADA: Carregamos a resposta como texto bruto
+            # A GRANDE SACADA: Carregar a resposta como texto bruto
             raw_text = response.text
             tamanho_mb = len(raw_text) / (1024 * 1024)
             print(f"[✅] Satélite retornou {tamanho_mb:.1f} MB de dados brutos. Filtrando a seco...")
@@ -35,7 +35,7 @@ async def obter_posicoes_linha(linha: str):
             linha_buscada = linha.strip().lstrip('0').upper()
             
             # Expressão Regular Ninja: Extrai apenas os pedaços de texto dos ônibus desejados.
-            # Burlar o parser nativo evita que a RAM exploda criando quase meio milhão de dicionários.
+            # Burlar o parser nativo para evitar que a RAM exploda criando quase meio milhão de dicionários.
             pattern = r'\{[^{}]*"linha"\s*:\s*"?[ 0]*' + re.escape(linha_buscada) + r'(?:"|\b)[^{}]*\}'
             matches = re.findall(pattern, raw_text, re.IGNORECASE)
             
@@ -48,7 +48,7 @@ async def obter_posicoes_linha(linha: str):
             
             frota_recente = {}
             
-            # Só agora, de forma segura, convertemos os poucos ônibus encontrados para Dicionário
+            # Só agora, de forma segura, converte os poucos ônibus encontrados para Dicionário
             for block in matches:
                 try:
                     v = json.loads(block)
