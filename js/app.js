@@ -65,7 +65,14 @@ class AppController {
         this.busMarkers = {}; // Suporte a múltiplos ônibus
         this.routeLayer = null;
         this.stopMarkers = [];
-        this.userMarker = null; // Rastreio do usuário (GPS)
+        
+        // GPS Tracking - Estilo Google Maps
+        this.userMarker = null;       // Ponto azul do usuário
+        this.accuracyCircle = null;   // Halo de precisão do GPS
+        this.gpsWatchId = null;       // ID do watchPosition
+        this.gpsState = 'off';        // 'off' | 'tracking' | 'following'
+        this.lastUserLatLng = null;   // Última posição conhecida
+
         this.pollingInterval = null;
         this.currentLine = null;
         
@@ -97,6 +104,14 @@ class AppController {
             maxZoom: 19, attribution: '© OpenStreetMap'
         }).addTo(this.map);
         L.control.zoom({ position: 'bottomright' }).addTo(this.map);
+
+        // Desativa o modo "following" se o usuário mover o mapa manualmente
+        this.map.on('dragstart', () => {
+            if (this.gpsState === 'following') {
+                this.gpsState = 'tracking';
+                this._updateLocationButtonUI();
+            }
+        });
     }
 
     bindEvents() {
@@ -153,7 +168,7 @@ class AppController {
             document.documentElement.setAttribute('data-theme', current === 'dark' ? 'light' : 'dark');
         });
 
-        btnLocation.addEventListener('click', () => this.getUserLocation());
+        btnLocation.addEventListener('click', () => this.toggleGPSTracking());
         btnFavoriteToggle.addEventListener('click', () => this.toggleFavorite());
     }
 
@@ -258,36 +273,172 @@ class AppController {
         localStorage.setItem('rioBusFavorites', JSON.stringify(this.favorites));
     }
 
-    async getUserLocation() {
+    // ==========================================
+    // GPS TRACKING - ESTILO GOOGLE MAPS
+    // ==========================================
+
+    /**
+     * Cicla entre 3 estados ao clicar no botão de localização:
+     *   off → tracking (mostra posição no mapa, sem seguir)
+     *   tracking → following (câmera acompanha o usuário)
+     *   following → off (desliga o GPS)
+     */
+    toggleGPSTracking() {
         if (!navigator.geolocation) {
-            alert("Seu navegador não suporta geolocalização.");
+            alert('Seu navegador não suporta geolocalização.');
             return;
         }
 
+        switch (this.gpsState) {
+            case 'off':
+                this._startGPSWatch();
+                break;
+            case 'tracking':
+                // Entra no modo "following" — câmera acompanha
+                this.gpsState = 'following';
+                this._updateLocationButtonUI();
+                if (this.lastUserLatLng) {
+                    this.map.flyTo(this.lastUserLatLng, 16, { animate: true, duration: 1 });
+                }
+                break;
+            case 'following':
+                this._stopGPSWatch();
+                break;
+        }
+    }
+
+    /** Inicia o watchPosition do navegador */
+    _startGPSWatch() {
         const btn = document.getElementById('btn-location');
-        btn.textContent = "⏳"; // Indicador de carregamento
+        btn.classList.add('gps-loading');
 
-        navigator.geolocation.getCurrentPosition((position) => {
-            const lat = position.coords.latitude;
-            const lng = position.coords.longitude;
-
-            // Desenha um ponto vermelho marcando a localização do usuário
-            if (this.userMarker) {
-                this.userMarker.setLatLng([lat, lng]);
-            } else {
-                this.userMarker = L.circleMarker([lat, lng], {
-                    radius: 8, fillColor: "#e74c3c", color: "#c0392b", weight: 3, fillOpacity: 1
-                }).addTo(this.map).bindPopup("<b>Você está aqui!</b>");
+        this.gpsWatchId = navigator.geolocation.watchPosition(
+            (position) => this._onGPSUpdate(position),
+            (error) => this._onGPSError(error),
+            {
+                enableHighAccuracy: true,
+                maximumAge: 5000,       // Cache de 5s para economia de bateria
+                timeout: 15000
             }
+        );
 
-            // Animação da câmera voando até o usuário
-            this.map.flyTo([lat, lng], 15, { animate: true, duration: 1.5 });
-            btn.textContent = "📍";
-        }, (error) => {
-            console.warn("Erro de GPS:", error);
-            alert("Não foi possível acessar seu GPS. Verifique se o navegador tem permissão.");
-            btn.textContent = "📍";
-        }, { enableHighAccuracy: true });
+        this.gpsState = 'tracking';
+        this._updateLocationButtonUI();
+    }
+
+    /** Para o watchPosition e remove os marcadores do mapa */
+    _stopGPSWatch() {
+        if (this.gpsWatchId !== null) {
+            navigator.geolocation.clearWatch(this.gpsWatchId);
+            this.gpsWatchId = null;
+        }
+
+        // Remove marcadores visuais do GPS
+        if (this.userMarker) {
+            this.map.removeLayer(this.userMarker);
+            this.userMarker = null;
+        }
+        if (this.accuracyCircle) {
+            this.map.removeLayer(this.accuracyCircle);
+            this.accuracyCircle = null;
+        }
+
+        this.lastUserLatLng = null;
+        this.gpsState = 'off';
+        this._updateLocationButtonUI();
+    }
+
+    /** Callback chamado a cada atualização do GPS */
+    _onGPSUpdate(position) {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const accuracy = position.coords.accuracy; // em metros
+        const latlng = [lat, lng];
+
+        this.lastUserLatLng = latlng;
+
+        // Remove a classe de loading na primeira posição recebida
+        document.getElementById('btn-location').classList.remove('gps-loading');
+
+        // --- Círculo de precisão (halo) ---
+        if (this.accuracyCircle) {
+            this.accuracyCircle.setLatLng(latlng);
+            this.accuracyCircle.setRadius(accuracy);
+        } else {
+            this.accuracyCircle = L.circle(latlng, {
+                radius: accuracy,
+                color: '#4285F4',
+                fillColor: '#4285F4',
+                fillOpacity: 0.1,
+                weight: 1,
+                opacity: 0.3,
+                interactive: false
+            }).addTo(this.map);
+        }
+
+        // --- Ponto azul pulsante (marcador do usuário) ---
+        if (this.userMarker) {
+            this.userMarker.setLatLng(latlng);
+        } else {
+            const blueDotIcon = L.divIcon({
+                className: 'gps-blue-dot',
+                iconSize: [20, 20],
+                iconAnchor: [10, 10],
+                html: `<div class="gps-dot-inner"></div><div class="gps-dot-pulse"></div>`
+            });
+
+            this.userMarker = L.marker(latlng, {
+                icon: blueDotIcon,
+                zIndexOffset: 9999, // Sempre acima dos ônibus
+                interactive: true
+            }).addTo(this.map).bindPopup('<b>Você está aqui</b>');
+
+            // Primeira posição: voa até o usuário
+            this.map.flyTo(latlng, 16, { animate: true, duration: 1.5 });
+        }
+
+        // Modo "following": câmera acompanha em tempo real
+        if (this.gpsState === 'following') {
+            this.map.panTo(latlng, { animate: true, duration: 0.5 });
+        }
+    }
+
+    /** Callback de erro do GPS */
+    _onGPSError(error) {
+        console.warn('Erro de GPS:', error);
+        document.getElementById('btn-location').classList.remove('gps-loading');
+
+        const messages = {
+            1: 'Permissão de localização negada. Habilite nas configurações do navegador.',
+            2: 'Não foi possível determinar sua localização. Verifique se o GPS está ativo.',
+            3: 'Tempo limite atingido ao buscar localização.'
+        };
+
+        alert(messages[error.code] || 'Erro desconhecido ao acessar o GPS.');
+        this._stopGPSWatch();
+    }
+
+    /** Atualiza o ícone e aparência do botão de localização */
+    _updateLocationButtonUI() {
+        const btn = document.getElementById('btn-location');
+        btn.classList.remove('gps-active', 'gps-following', 'gps-loading');
+
+        switch (this.gpsState) {
+            case 'off':
+                btn.textContent = '📍';
+                btn.title = 'Ativar Minha Localização';
+                break;
+            case 'tracking':
+                btn.textContent = '📍';
+                btn.classList.add('gps-active');
+                btn.title = 'Centralizar na Minha Localização';
+                break;
+            case 'following':
+                btn.textContent = '🧭';
+                btn.classList.add('gps-following');
+                btn.title = 'Desativar Localização';
+                break;
+        }
     }
 
     async startRealTimeTracking() {
